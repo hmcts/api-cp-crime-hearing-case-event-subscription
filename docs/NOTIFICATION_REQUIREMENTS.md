@@ -25,15 +25,19 @@ HMCTS must publish case result events whenever:
 * A new custodial outcome occurs.
 * An amended custodial result is recorded (treated identically to “create”).
 
-Subscription Request (Illustrative)
+## Subscription
+
+### Subscription Registration
+
+`POST /cases/results/subscriptions`
+
 ```json
-POST /cases/results/subscriptions
 {
     "ClientSubscriptionId": "string",
     "Events": ["ResultEventType", "..."],
-    "NotificationChannel": {
-        "Role": "string",
-        "Topic": "string"
+    "NotificationEndpoint": {
+      "WebhookUrl": "https://consumer.gov.uk/hooks/case-events",
+      "Auth": "string"
     }
 }
 ```
@@ -45,7 +49,7 @@ Response:
 }
 ```
 
-Event Payload Must Include:
+(TBC) Event Payload Must Include:
 * Case ID
 * Defendant ID
 * PNC ID (if present)
@@ -55,9 +59,17 @@ Event Payload Must Include:
 
 These events will ultimately replace the existing email “action point”.
 
+### Webhook Delivery Requirements
+
+* Consumer must provide HTTPS POST endpoint.
+* API Marketplace will sign webhook deliveries (HMAC header).
+* Consumer must return 2xx to acknowledge.
+* Retries managed by Worker with exponential backoff - 3 tries over 15 minutes.
+* Failures routed to DLQ - DLQs will be kept per subscription for 28 days, then they will be purged.
+
 ### Subscription Retrieval
 
-Retrieve all subscriptions
+Retrieve all subscriptions for the consumer
 
 `GET /cases/results/subscriptions`
 
@@ -66,7 +78,10 @@ Response:
 {
     "subscriptions": [
         {
-          "subscriptionId": ["ResultEventType", "..."]
+          "THE_SUBSCRIPTION_ID": ["ResultEventType", "..."]
+        },
+        {
+          "ANOTHER_SUBSCRIPTION_ID": ["ResultEventType", "..."]
         }
     ]
 }
@@ -81,96 +96,99 @@ Response:
     {
       "subscriptions": [
         {
-          "subscriptionId": ["ResultEventType", "..."]
+          "THE_SUBSCRIPTION_ID": ["ResultEventType", "..."]
         }
       ]
     }
 ```
 
+#### Sequence Diagrams: Subscription Registration and Retrieval
+
+```mermaid
+sequenceDiagram
+    
+    participant Consumer as Remand and Sentencing Service (HMPPS)
+    participant APIM as API Management (Gateway)
+    participant CCRS as Crime Court Hearing Cases<br/>Results Subscription
+    
+
+    Note over Consumer,CCRS: Subscription Registration
+
+    Consumer->>APIM: POST /cases/results/subscriptions<br/>{ClientSubscriptionId, Events[], NotificationEndpoint}
+    APIM->>CCRS: Validate subscription request
+    CCRS->>CCRS: Create subscription record (subscriptionId)
+    CCRS-->>Consumer: 201 Created<br/>{subscriptionId}
+
+    Note over Consumer,CCRS: Retrieve Subscription
+
+    Consumer->>CCRS: GET /cases/results/subscriptions/{subscriptionId}
+    APIM->>CCRS: 
+    CCRS-->>Consumer: 200 OK<br/>{subscription details}
+
+```
+
+## Subscription Event Delivery & Document Retrieval
+
 ```mermaid
 sequenceDiagram
     autonumber
 
-    participant Consumer as RaSS (Prison Service)
-    participant AMP as API Marketplace (AMP)
-    participant CP as Common Platform
-    participant Broker as Notification Channel (Topic/Queue)
+    participant Webhook as RaSS (HMPPS)<br/>Webhook Endpoint
+    participant APIM as API Management (Gateway)
+    
+    participant CCRS as Crime Courthearing Cases<br/>Results Subscription<br/>(Worker)
+    participant AB as Azure Service Bus
 
-    Note over Consumer,AMP: Subscription Registration
+    participant FILTER as Courthearing Cases Result<br/>Event Subscription Filter
+    participant ART as Artemis
 
-    Consumer->>AMP: POST /cases/results/subscriptions<br/>{ClientSubscriptionId, Events[], NotificationChannel}
-    AMP->>AMP: Validate subscription request
-    AMP->>AMP: Create subscription record (subscriptionId)
-    AMP-->>Consumer: 201 Created<br/>{subscriptionId}
-
-    Note over Consumer,AMP: Retrieve Subscription
-
-    Consumer->>AMP: GET /cases/results/subscriptions/{subscriptionId}
-    AMP-->>Consumer: 200 OK<br/>{subscription details}
-
-    Note over CP,AMP: Producer publishes result events
-
-    CP->>AMP: Case Result Event<br/>(custody-relevant only)
-    AMP->>AMP: Apply subscription filters
-    AMP->>Broker: Publish event to Topic/Queue<br/>{event metadata}
-
-    Note over Broker,Consumer: Event Delivery
-
-    Broker-->>Consumer: Deliver result event<br/>(asynchronously)
-
-    Note over Consumer,Broker: Consumer Pull Model
-
-    Consumer->>AMP: GET /cases/{caseId}/results/{eventType}
-    AMP-->>Consumer: 200 OK<br/>{metadata + link to signed document URL}
-
-    Note over Consumer: Optional Document Retrieval
-
-    Consumer->>AMP: GET /cases/{caseId}/results/{eventType}/document
-    AMP-->>Consumer: 200 OK<br/>{signed URL}
-
-    Note over Consumer,AMP: End of Subscription Flow
+    FILTER-->>ART: Listening: Result Events
+    FILTER->>FILTER: Filter messages to only include those<br/>relevant to the consumer’s interests or subscriptions.
+    FILTER->>AB: Publish messages to queue
+    CCRS-->>AB: Listening: Pop Results messages
+    
+    Note over CCRS,Webhook: Producer publishes result events
+    CCRS->>APIM: Case Result Event
+    
+    APIM-->>Webhook: Consumer: Deliver result event<br/>(asynchronously)
 ```
 
 
-### Consumer Pull Model
+### Document Retrieval Process
 
 After receiving an event, the consumer (RaSS) will:
-1.	Receive notification through the subscribed channel (topic).
+1.	Receive webhook POST event.
 2.	MVP behaviour:
-* Request the event details and a “document link pointer” via:
-`GET /cases/{case_id}/results/{result_event_type}`
+   * Request the event details and a “document link pointer” via: `GET /cases/{case_id}/results/{result_event_type}`
+   * **NOTE:** the underlying service must only allow retrieval of subscription-relevant events.
 3.	Follow the URL to obtain a signed URL for the PDF warrant document.
 
 ```mermaid
+
 sequenceDiagram
     autonumber
 
-    participant Consumer as RaSS (Prison Service)
-    participant Broker as Notification Channel (Topic/Queue)
-    participant AMP as API Marketplace
-    participant CP as Common Platform (Producer)
-    participant DocStore as HMCTS Document Store
+    participant Consumer as RaSS (HMPPS)
+    participant Webhook as RaSS (HMPPS)<br/>Webhook Endpoint
+    participant APIM as API Management (Gateway)    
+    participant CCRS as Crime Courthearing Cases<br/>Results Subscription<br/>(Worker)
+    participant DocStore as Azure Storage<br/>Document Store
 
-    Note over CP,AMP: Custody-Relevant Event Produced
-    CP->>AMP: Publish Result Event<br/>(custody-relevant)
+    Note over APIM,Webhook: Producer publishes result events
+    CCRS->>APIM: Case Result Event
+    
+    APIM-->>Webhook: Consumer: Deliver result event<br/>(asynchronously)
 
-    AMP->>Broker: Push event to subscribed topic/queue
+    Note over Consumer,APIM: Result Event Data Retrieval
 
-    Note over Broker,Consumer: Event Delivery
-    Broker-->>Consumer: Deliver result event notification<br/>(asynchronous)
+    Consumer->>APIM: GET /cases/{caseId}/results/{eventType}
+    APIM-->>Consumer: 200 OK<br/>{metadata + link to signed document URL}
 
-    Note over Consumer: Consumer Pull Model Begins
+    Note over Consumer: Document Retrieval via signed URL
 
-    Consumer->>AMP: GET /cases/{caseId}/results/{eventType}<br/>(request event metadata)
-    AMP-->>Consumer: 200 OK<br/>{result metadata + document pointer}
-
-    Consumer->>AMP: GET /cases/{caseId}/results/{eventType}/document<br/>(request signed URL)
-    AMP-->>Consumer: 200 OK<br/>{signedDocumentUrl}
-
-    Note over Consumer,DocStore: Document Retrieval
     Consumer->>DocStore: GET {signedDocumentUrl}
-    DocStore-->>Consumer: 200 OK<br/>PDF Warrant
-
+    DocStore-->>Consumer: 200 OK<br/>PDF Document Stream
+    
     Note over Consumer: Consumer stores PDF locally<br/>(S3 or equivalent)
 ```
 
@@ -186,38 +204,6 @@ Until the operational process changes, this must remain part of the producer–c
 * API returns metadata and a signed URL for the PDF.
 * HMCTS document storage remains the source of truth.
 * Prisons will store a local copy (AWS S3) to support their workflow automation.
-
-```mermaid
-sequenceDiagram
-    autonumber
-
-    participant Consumer as RaSS (Prison Service)
-    participant AMP as API Marketplace
-    participant DocStore as HMCTS Document Store
-    participant LocalStore as RaSS S3 Storage
-
-    Note over Consumer,AMP: Consumer requests document metadata
-
-    Consumer->>AMP: GET /cases/{caseId}/results/{eventType}
-    AMP-->>Consumer: 200 OK<br/>{result metadata + document pointer}
-
-    Note over Consumer,AMP: Request signed URL
-
-    Consumer->>AMP: GET /documents/{documentId}/signed-url
-    AMP-->>Consumer: 200 OK<br/>{signedDocumentUrl}
-
-    Note over Consumer,DocStore: Retrieve actual PDF
-
-    Consumer->>DocStore: GET {signedDocumentUrl}
-    DocStore-->>Consumer: 200 OK<br/>PDF Document Stream
-
-    Note over Consumer,LocalStore: Store locally for workflow automation
-
-    Consumer->>LocalStore: PUT /warrants/{documentId}.pdf<br/>(store PDF)
-    LocalStore-->>Consumer: 200 OK
-
-    Note over Consumer: Consumer local system now has<br/>a durable copy for automations and movement workflows
-```
 
 **Benefits**
 
@@ -252,25 +238,26 @@ sequenceDiagram
     autonumber
 
     participant AMP as API Marketplace
-    participant Broker as Notification Channel
+    participant Worker as Delivery Worker
     participant Consumer as RaSS (Prison Service)
     participant DLQ as Dead-Letter Queue
 
-    Note over AMP,Broker: Event Published
+    Note over AMP,Worker: Event Published
 
-    AMP->>Broker: Publish custody-relevant event
-    Broker->>Consumer: Deliver event notification
+    AMP->>Worker: Publish custody-relevant event
+    Worker->>AMP: HTTP POST retry
+    AMP->>Consumer: Deliver webhook
 
     alt Consumer Unavailable or Delivery Failure
-        Consumer--x Broker: Delivery fails
-        Broker->>Broker: Retry with exponential backoff
-        Broker--x Consumer: Retry attempt<br/>(still failing)
+        Consumer--x AMP: Delivery fails
+        Worker->>Worker: Retry with exponential backoff
+        Worker--x AMP: Retry attempt<br/>(still failing)
 
-        Note over Broker,DLQ: Event moved to DLQ after final retry
+        Note over Worker,DLQ: Event moved to DLQ after final retry
 
-        Broker->>DLQ: Move undeliverable event
+        Worker->>DLQ: Move undeliverable event
     else Delivery Successful
-        Consumer-->>Broker: 200 OK<br/>(event accepted)
+        Consumer-->>AMP: 200 OK<br/>(event accepted)
     end
 
     Note over Consumer,DLQ: DLQ Inspection
@@ -285,9 +272,10 @@ sequenceDiagram
     Consumer->>AMP: POST /cases/results/subscriptions/{subscriptionId}/events/replay
     AMP->>DLQ: Retrieve events for replay
     DLQ-->>AMP: Return DLQ events
-    AMP->>Broker: Resubmit events to correct topic/queue
-    Broker->>Consumer: Redeliver events
-    Consumer-->>Broker: 200 OK<br/>(event processed successfully)
+    AMP->>Worker: Resubmit events to correct endpoint
+    Worker->>AMP: HTTP POST retry
+    AMP->>Consumer: Deliver webhook
+    Consumer-->>AMP: 200 OK<br/>(event processed successfully)
 ```
 
 ## Event Filtering Requirements
