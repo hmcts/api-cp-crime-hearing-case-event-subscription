@@ -198,7 +198,7 @@ Future enhancements will expand JSON payload richness so prisons rely less on PD
 The PDF remains the operational currency today.
 Until the operational process changes, this must remain part of the producer–consumer relationship.
 
-### Document Retrieval Requirements
+#### Document Retrieval Requirements
 
 * Documents must not be embedded in any JSON event payload.
 * API returns metadata and a signed URL for the PDF.
@@ -223,59 +223,64 @@ Delivery Guarantees
 * Ability for consumers to inspect DLQs
 * Ability for consumers to replay DLQs once systems recover
 
-### DLQ Inspection
+#### DLQ Inspection
 
 `GET /cases/results/subscriptions/{subscriptionId}/events`
 
-### DLQ Replay
+#### DLQ Replay
 
 `POST /cases/results/subscriptions/{subscriptionId}/events/replay`
 
 This strictly aligns replay with the subscription that owns the events.
 
 ```mermaid
+
 sequenceDiagram
     autonumber
 
-    participant AMP as API Marketplace
-    participant Worker as Delivery Worker
-    participant Consumer as RaSS (Prison Service)
+    participant Consumer as RaSS (HMPPS)
+    participant APIM as API Management (Gateway)
+    participant Worker as Crime Courthearing Cases<br/>Results Subscription<br/>(Worker)
+
     participant DLQ as Dead-Letter Queue
+    participant AB as Azure Service Bus
 
-    Note over AMP,Worker: Event Published
+    Note over APIM,Worker: Event Published
 
-    AMP->>Worker: Publish custody-relevant event
-    Worker->>AMP: HTTP POST retry
-    AMP->>Consumer: Deliver webhook
+    Worker->>APIM: POST Case Result Event
+    APIM->>Consumer: Deliver webhook event
 
     alt Consumer Unavailable or Delivery Failure
-        Consumer--x AMP: Delivery fails
+        Consumer--x APIM: Delivery fails
         Worker->>Worker: Retry with exponential backoff
-        Worker--x AMP: Retry attempt<br/>(still failing)
+        Worker--x APIM: Retry attempt<br/>(still failing)
 
         Note over Worker,DLQ: Event moved to DLQ after final retry
 
         Worker->>DLQ: Move undeliverable event
     else Delivery Successful
-        Consumer-->>AMP: 200 OK<br/>(event accepted)
+        Consumer-->>APIM: 200 OK<br/>(event accepted)
     end
 
     Note over Consumer,DLQ: DLQ Inspection
 
-    Consumer->>AMP: GET /cases/results/subscriptions/{subscriptionId}/events
-    AMP->>DLQ: Retrieve DLQ events
-    DLQ-->>AMP: Return stored failed events
-    AMP-->>Consumer: 200 OK<br/>{events[]}
+    Consumer->>APIM: GET /cases/results/subscriptions/{subscriptionId}/events
+    APIM->>DLQ: Retrieve DLQ events
+    DLQ-->>APIM: Return stored failed events
+    APIM-->>Consumer: 200 OK<br/>{events[]}
 
     Note over Consumer,DLQ: DLQ Replay
 
-    Consumer->>AMP: POST /cases/results/subscriptions/{subscriptionId}/events/replay
-    AMP->>DLQ: Retrieve events for replay
-    DLQ-->>AMP: Return DLQ events
-    AMP->>Worker: Resubmit events to correct endpoint
-    Worker->>AMP: HTTP POST retry
-    AMP->>Consumer: Deliver webhook
-    Consumer-->>AMP: 200 OK<br/>(event processed successfully)
+    Consumer->>APIM: POST /cases/results/subscriptions/{subscriptionId}/events/replay
+
+    APIM->>+Worker: Request replay of events
+    Worker-->>AB: Add DLQ events to Queue for replay
+    Worker-->>-APIM: HTTP Accepted 202
+    APIM-->>Consumer: HTTP Accepted 202
+
+    Note over APIM,Worker: (Replayed) Event Published
+    Worker->>APIM: POST Case Result Event
+    APIM->>Consumer: Deliver webhook event
 ```
 
 ## Event Filtering Requirements
