@@ -1,4 +1,3 @@
-
 // check dependencies upon release ONLY
 tasks.named("dependencyUpdates").configure {
   def isNonStable = { String version ->

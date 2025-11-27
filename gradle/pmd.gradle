@@ -4,19 +4,19 @@ pmd {
   ignoreFailures = false
 }
 
-tasks.withType(Pmd) {
-  reports {
-    xml.required.set(true)
-    html.required.set(true)
-  }
-}
-
 tasks.named("pmdMain").configure {
   onlyIf { gradle.startParameter.taskNames.contains(name) }
 }
 
 tasks.named("pmdTest").configure {
   enabled = false
+}
+
+tasks.withType(Pmd) {
+  reports {
+    xml.required.set(true)
+    html.required.set(true)
+  }
 }
 
 tasks.withType(Checkstyle).configureEach {

@@ -25,6 +25,7 @@ jobs:
           rulesets: '.github/pmd-ruleset.xml'
           sourcePath: 'src/main/java'
           analyzeModifiedFilesOnly: false
+
       - name: Fail build if there are violations
         if: always()
         run: |
