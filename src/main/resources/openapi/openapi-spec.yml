@@ -209,7 +209,6 @@ components:
       enum:
         - PCR
         - CUSTODIAL_RESULT
-      example: PCR
 
     NotificationEndpoint:
       type: object
@@ -220,7 +219,6 @@ components:
           type: string
           format: uri
           pattern: '^https://.*$'
-          example: "https://client.example.com/events"
 
     ClientSubscriptionRequest:
       type: object
@@ -235,7 +233,6 @@ components:
           minItems: 1
           items:
             $ref: '#/components/schemas/EventType'
-          example: ["PCR", "CUSTODIAL_RESULT"]
 
     ClientSubscription:
       type: object
@@ -248,20 +245,17 @@ components:
         clientSubscriptionId:
           type: string
           format: uuid
-          example: "aa12f3dd-4cc1-4da7-b9ea-552fa3b9bc44"
         notificationEndpoint:
           $ref: '#/components/schemas/NotificationEndpoint'
         eventTypes:
           type: array
           items:
             $ref: '#/components/schemas/EventType'
-          example: ["PCR"]
         createdAt:
           type: string
           format: date-time
-          example: "2025-01-01T10:00:00Z"
         updatedAt:
-          type: string
+          type:
+            - string
           format: date-time
           nullable: true
-          example: "2025-01-02T15:45:00Z"
