@@ -28,14 +28,16 @@ ext {
 }
 
 dependencies {
-  implementation 'org.openapitools:openapi-generator-core:7.17.0'
-  implementation 'io.swagger.parser.v3:swagger-parser:2.1.36'
+  // See docs/DEPENDENCIES.md
   implementation 'io.swagger.core.v3:swagger-annotations:2.2.41'
-  implementation 'net.logstash.logback:logstash-logback-encoder:9.0'
 
-  implementation 'com.fasterxml.jackson.core:jackson-annotations:2.20'
-  implementation "org.springframework.boot:spring-boot-starter-web:$springBootVersion"
-  implementation "org.springframework.boot:spring-boot-starter-validation:$springBootVersion"
+  compileOnly 'org.openapitools:openapi-generator-core:7.17.0'
+  compileOnly 'io.swagger.parser.v3:swagger-parser:2.1.36'
+
+  compileOnly "org.springframework.boot:spring-boot-starter-web:$springBootVersion"
+  testCompileOnly "org.springframework.boot:spring-boot-starter-web:$springBootVersion"
+  compileOnly "org.springframework.boot:spring-boot-starter-validation:$springBootVersion"
+  testCompileOnly "org.springframework.boot:spring-boot-starter-validation:$springBootVersion"
   testImplementation "org.springframework.boot:spring-boot-starter-test:$springBootVersion"
 
   compileOnly group: 'org.projectlombok', name: 'lombok', version: lombokVersion
