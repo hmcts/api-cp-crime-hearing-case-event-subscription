@@ -19,6 +19,35 @@ Authorization: Bearer <JWT>
 
 ---
 
+# Sequence diagrams
+```mermaid
+sequenceDiagram
+    autonumber
+
+    participant Client as API Client
+    participant API as Subscription API
+
+%% CREATE SUBSCRIPTION
+    Client->>API: POST /client-subscriptions\n{notificationEndpoint, eventTypes}
+    API-->>Client: 201 Created\nClientSubscription
+
+%% GET SUBSCRIPTION
+    Client->>API: GET /client-subscriptions/{id}
+    alt Subscription exists
+        API-->>Client: 200 OK\nClientSubscription
+    else Not found
+        API-->>Client: 404 Not Found
+    end
+
+%% UPDATE SUBSCRIPTION (PUT – strict)
+    Client->>API: PUT /client-subscriptions/{id}\n{notificationEndpoint, eventTypes}
+    API-->>Client: 200 OK\nClientSubscription
+
+%% DELETE SUBSCRIPTION
+    Client->>API: DELETE /client-subscriptions/{id}
+    API-->>Client: 204 No Content
+```
+
 # 🚀 Endpoints
 
 ## Client Subscriptions API – Endpoint Summary
