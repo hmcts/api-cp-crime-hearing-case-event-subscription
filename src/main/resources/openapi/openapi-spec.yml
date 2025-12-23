@@ -266,7 +266,6 @@ components:
       type: object
       description: >
         Payload representing a stored PCR document event.
-        This model is currently not used by any API operation.
       required:
         - eventId
         - caseUrn
